@@ -4,6 +4,7 @@ import json
 import re
 import requests
 from collections import defaultdict
+import os
 
 # ------------------ НАСТРОЙКИ СТРАНИЦЫ ------------------
 st.set_page_config(
@@ -11,6 +12,24 @@ st.set_page_config(
     page_icon="🌿",
     layout="wide"
 )
+
+# ------------------ ФАЙЛ ДЛЯ СОХРАНЕНИЯ ДАННЫХ ------------------
+DATA_FILE = "marina_data.json"
+
+def load_data():
+    """Загружает данные из файла"""
+    if os.path.exists(DATA_FILE):
+        try:
+            with open(DATA_FILE, "r", encoding="utf-8") as f:
+                return json.load(f)
+        except:
+            return []
+    return []
+
+def save_data(entries):
+    """Сохраняет данные в файл"""
+    with open(DATA_FILE, "w", encoding="utf-8") as f:
+        json.dump(entries, f, ensure_ascii=False, indent=2, default=str)
 
 # ------------------ СТИЛИ ------------------
 st.markdown("""
@@ -41,6 +60,19 @@ st.markdown("""
         margin-bottom: 1.5rem;
         border-left: 5px solid #7BAF8A;
     }
+    .green-button {
+        background-color: #7BAF8A;
+        color: white;
+        border: none;
+        padding: 0.6rem 1.5rem;
+        border-radius: 30px;
+        font-weight: bold;
+        cursor: pointer;
+        width: 100%;
+    }
+    .green-button:hover {
+        background-color: #5E8F6E;
+    }
     .footer {
         text-align: center;
         color: #8BA89A;
@@ -59,7 +91,7 @@ st.markdown("""
 </style>
 """, unsafe_allow_html=True)
 
-# ------------------ ПРОФИЛЬ ------------------
+# ------------------ ПРОФИЛЬ (ТВОЙ) ------------------
 PROFILE = {
     "name": "Марина",
     "family": {
@@ -110,29 +142,8 @@ if "authenticated" not in st.session_state:
     st.session_state.authenticated = False
 if "api_key" not in st.session_state:
     st.session_state.api_key = ""
-import os
-import json
-
-DATA_FILE = "marina_data.json"
-
-def load_data():
-    """Загружает данные из файла"""
-    if os.path.exists(DATA_FILE):
-        try:
-            with open(DATA_FILE, "r", encoding="utf-8") as f:
-                return json.load(f)
-        except:
-            return []
-    return []
-
-def save_data(entries):
-    """Сохраняет данные в файл"""
-    with open(DATA_FILE, "w", encoding="utf-8") as f:
-        json.dump(entries, f, ensure_ascii=False, indent=2, default=str)
-
 if "entries" not in st.session_state:
     st.session_state.entries = load_data()
-    st.session_state.entries = []
 if "current_page" not in st.session_state:
     st.session_state.current_page = "Главная"
 if "profile" not in st.session_state:
@@ -142,6 +153,7 @@ if "temp_text" not in st.session_state:
 
 # ------------------ ФУНКЦИИ ------------------
 def call_deepseek(prompt, api_key):
+    """Вызов DeepSeek через Polza.ai"""
     try:
         url = "https://api.polza.ai/v1/chat/completions"
         headers = {
@@ -153,7 +165,7 @@ def call_deepseek(prompt, api_key):
             "messages": [{"role": "user", "content": prompt}],
             "temperature": 0.7
         }
-        response = requests.post(url, headers=headers, json=data, timeout=90)
+        response = requests.post(url, headers=headers, json=data, timeout=30)
         if response.status_code == 200:
             return response.json()["choices"][0]["message"]["content"]
         else:
@@ -161,39 +173,92 @@ def call_deepseek(prompt, api_key):
     except Exception as e:
         return f"Ошибка: {str(e)}"
 
+def analyze_entries(entries, profile, api_key):
+    """Анализ записей с помощью ИИ"""
+    if not entries:
+        return "Нет записей для анализа."
+    
+    text = "\n".join([f"- {e['text']}" for e in entries[-30:]])
+    prompt = f"""
+    Ты — поддерживающий коуч для Марины.
+    Её цели: {', '.join(profile['goals_5_years'])}
+    Её привычки: {', '.join(profile['habits'])}
+    
+    Вот её записи за последнее время:
+    {text}
+    
+    Проанализируй:
+    1. Какие категории чаще всего встречаются (спорт, семья, работа, забота о себе)?
+    2. Какие успехи она уже достигла?
+    3. Что можно улучшить?
+    4. Какой у неё прогресс к целям?
+    5. Дай 2-3 тёплые рекомендации на следующую неделю.
+    
+    Отвечай на русском, коротко, поддерживающим тоном.
+    """
+    return call_deepseek(prompt, api_key)
+
 def generate_morning_plan(profile, api_key):
+    """Генерация плана на день"""
     today = datetime.datetime.now().strftime("%A, %d %B")
     prompt = f"""
     Ты — личный коуч Марины.
     Сегодня {today}.
     Её идеальный день: {', '.join(profile['ideal_day'])}.
     Рабочие дни: {', '.join(profile['work_days'])}.
-    Составь для неё мягкий план на сегодня.
-    Напиши в поддерживающем, тёплом тоне.
+    
+    Составь для неё мягкий план на сегодня с учётом:
+    - прогулки с Алексом
+    - рабочего блока (если сегодня рабочий день)
+    - времени на себя
+    - подготовки ко сну
+    
+    Напиши в поддерживающем, тёплом тоне. Добавь одну цитату или вдохновляющую фразу.
     """
     return call_deepseek(prompt, api_key)
 
 def generate_weekly_summary(entries, profile, api_key):
-    if not entries:
-        return "Нет записей за неделю."
-    text = "\n".join([f"- {e['text']}" for e in entries[-7:]])
+    """Еженедельный итог"""
+    week_entries = [e for e in entries if (datetime.datetime.now() - datetime.datetime.strptime(e['date'], "%Y-%m-%d %H:%M:%S.%f")).days < 7]
+    if not week_entries:
+        return "За эту неделю нет записей."
+    
+    text = "\n".join([f"- {e['text']}" for e in week_entries])
     prompt = f"""
     Ты — коуч Марины.
     Вот её записи за эту неделю:
     {text}
-    Составь итог недели.
+    
+    Составь итог недели:
+    1. Что получилось лучше всего?
+    2. Что можно улучшить?
+    3. 3 главные победы.
+    4. План на следующую неделю (3 задачи).
+    
+    Отвечай тёпло, поддерживающе.
     """
     return call_deepseek(prompt, api_key)
 
 def generate_monthly_summary(entries, profile, api_key):
-    if not entries:
-        return "Нет записей за месяц."
-    text = "\n".join([f"- {e['text']}" for e in entries[-30:]])
+    """Ежемесячный итог"""
+    month_entries = [e for e in entries if datetime.datetime.strptime(e['date'], "%Y-%m-%d %H:%M:%S.%f").month == datetime.datetime.now().month]
+    if not month_entries:
+        return "За этот месяц нет записей."
+    
+    text = "\n".join([f"- {e['text']}" for e in month_entries])
     prompt = f"""
     Ты — коуч Марины.
     Вот её записи за этот месяц:
     {text}
-    Составь итог месяца.
+    
+    Составь глубокий итог месяца:
+    1. Категории и частотность (спорт, семья, работа, забота о себе).
+    2. Прогресс по целям Марины: {', '.join(profile['goals_5_years'])}
+    3. Что сработало, что дало ресурс?
+    4. Что можно скорректировать?
+    5. План на следующий месяц (3-5 целей).
+    
+    Ответ должен быть развёрнутым, вдохновляющим.
     """
     return call_deepseek(prompt, api_key)
 
@@ -250,6 +315,28 @@ if page == "Главная":
                 st.session_state.temp_text = plan
         if st.session_state.temp_text:
             st.markdown(f"<div class='card'>{st.session_state.temp_text}</div>", unsafe_allow_html=True)
+    
+    with st.container():
+        st.markdown("### 📖 Книга успехов")
+        if st.session_state.entries:
+            # Группировка по месяцам
+            sorted_entries = sorted(st.session_state.entries, key=lambda x: datetime.datetime.strptime(x['date'], "%Y-%m-%d %H:%M:%S.%f"), reverse=True)
+            months = {}
+            for e in sorted_entries:
+                date_obj = datetime.datetime.strptime(e['date'], "%Y-%m-%d %H:%M:%S.%f")
+                key = date_obj.strftime("%B %Y")
+                if key not in months:
+                    months[key] = []
+                months[key].append(e)
+            
+            for month, entries in list(months.items())[:3]:
+                st.markdown(f"#### {month}")
+                for entry in entries[:5]:
+                    st.markdown(f"<div class='win-entry'>📌 {entry['text']}</div>", unsafe_allow_html=True)
+                if len(entries) > 5:
+                    st.caption(f"и ещё {len(entries) - 5} записей...")
+        else:
+            st.info("Пока нет записей. Напиши свои победы в разделе «Победы»!")
 
 elif page == "Победы":
     st.markdown("### 🌙 Вечерние победы")
@@ -259,11 +346,12 @@ elif page == "Победы":
     
     if st.button("💾 Сохранить победы"):
         if victory_text.strip():
-            st.session_state.entries.append({
-                "date": datetime.datetime.now(),
+            new_entry = {
+                "date": str(datetime.datetime.now()),
                 "text": victory_text.strip()
-            })
-save_data(st.session_state.entries)
+            }
+            st.session_state.entries.append(new_entry)
+            save_data(st.session_state.entries)
             st.success("✅ Запись сохранена! Ты большая молодец 🌿")
             st.rerun()
         else:
@@ -272,8 +360,10 @@ save_data(st.session_state.entries)
     st.divider()
     st.markdown("### 📜 Мои победы (все записи)")
     if st.session_state.entries:
-        for entry in sorted(st.session_state.entries, key=lambda x: x['date'], reverse=True)[:20]:
-            st.markdown(f"<div class='win-entry'>📌 {entry['date'].strftime('%d.%m')}: {entry['text']}</div>", unsafe_allow_html=True)
+        sorted_entries = sorted(st.session_state.entries, key=lambda x: datetime.datetime.strptime(x['date'], "%Y-%m-%d %H:%M:%S.%f"), reverse=True)
+        for entry in sorted_entries[:20]:
+            date_obj = datetime.datetime.strptime(entry['date'], "%Y-%m-%d %H:%M:%S.%f")
+            st.markdown(f"<div class='win-entry'>📌 {date_obj.strftime('%d.%m')}: {entry['text']}</div>", unsafe_allow_html=True)
     else:
         st.info("Пока нет записей. Начни прямо сейчас!")
 
@@ -304,11 +394,29 @@ elif page == "Цели":
         
         st.markdown("#### 📌 Цели на этот год")
         st.markdown(f"- {st.session_state.profile['goals_this_year']}")
+    
+    with st.container():
+        st.markdown("#### 🧠 ИИ-анализ целей")
+        if st.button("🔍 Попросить ИИ-коуча проанализировать мои цели"):
+            with st.spinner("Анализирую..."):
+                entries_text = "\n".join([f"- {e['text']}" for e in st.session_state.entries[-30:]])
+                prompt = f"""
+                Ты — коуч Марины.
+                Её цели: {', '.join(st.session_state.profile['goals_5_years'])}
+                Её текущие привычки: {', '.join(st.session_state.profile['habits'])}
+                Её записи: {entries_text}
+                
+                Проанализируй, насколько её ежедневные действия соответствуют её целям.
+                Дай конкретные рекомендации, как ей лучше двигаться к целям.
+                Будь поддерживающим, но честным.
+                """
+                analysis = call_deepseek(prompt, st.session_state.api_key)
+                st.markdown(f"<div class='card'>{analysis}</div>", unsafe_allow_html=True)
 
 # ------------------ ФУТЕР ------------------
-st.markdown("""
+st.markdown(f"""
 <div class='footer'>
     🌿 Марина: Планер жизни — создано с любовью для тебя<br>
-    <small>Все данные хранятся только в этой сессии.</small>
+    <small>Все данные хранятся в файле на сервере.</small>
 </div>
 """, unsafe_allow_html=True)
