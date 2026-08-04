@@ -120,6 +120,17 @@ st.markdown("""
         border: 1px dashed #7BAF8A;
         margin-top: 1rem;
     }
+    .debug-box {
+        background: #FFF3CD;
+        padding: 1rem;
+        border-radius: 10px;
+        border-left: 5px solid #FFC107;
+        margin: 1rem 0;
+        font-family: monospace;
+        font-size: 0.9rem;
+        white-space: pre-wrap;
+        word-break: break-all;
+    }
 </style>
 """, unsafe_allow_html=True)
 
@@ -174,6 +185,8 @@ if "daily_plan_dialog" not in st.session_state:
     st.session_state.daily_plan_dialog = []
 if "editing_entry" not in st.session_state:
     st.session_state.editing_entry = None
+if "debug_info" not in st.session_state:
+    st.session_state.debug_info = ""
 
 # ------------------ ФУНКЦИИ ДЛЯ РАБОТЫ С ИИ ------------------
 def call_deepseek(prompt, api_key):
@@ -188,12 +201,25 @@ def call_deepseek(prompt, api_key):
             "messages": [{"role": "user", "content": prompt}],
             "temperature": 0.7
         }
+        
+        # Сохраняем отладочную информацию
+        debug_msg = f"🔑 Ключ (первые 10 символов): {api_key[:10]}...\n"
+        debug_msg += f"📤 Запрос к: {url}\n"
+        debug_msg += f"📦 Модель: deepseek-v4-pro\n"
+        
         response = requests.post(url, headers=headers, json=data, timeout=30)
+        
+        debug_msg += f"📊 Статус: {response.status_code}\n"
+        debug_msg += f"📄 Ответ: {response.text[:500]}"
+        
+        st.session_state.debug_info = debug_msg
+        
         if response.status_code == 200:
             return response.json()["choices"][0]["message"]["content"]
         else:
-            return f"Ошибка: {response.status_code}"
+            return f"Ошибка: {response.status_code}\n\n{response.text}"
     except Exception as e:
+        st.session_state.debug_info = f"❌ Исключение: {str(e)}"
         return f"Ошибка: {str(e)}"
 
 # ------------------ АВТОРИЗАЦИЯ (ДВУХЭТАПНАЯ) ------------------
@@ -236,9 +262,10 @@ if st.session_state.authenticated and not st.session_state.api_key_verified:
                 if response.status_code == 200:
                     st.session_state.api_key = api_key_input
                     st.session_state.api_key_verified = True
+                    st.session_state.debug_info = "✅ Ключ успешно проверен!"
                     st.rerun()
                 else:
-                    st.error("❌ API-ключ неверный или неактивный. Проверьте его в Polza.ai.")
+                    st.error(f"❌ API-ключ неверный или неактивный.\nСтатус: {response.status_code}\nОтвет: {response.text[:200]}")
             except Exception as e:
                 st.error(f"❌ Ошибка подключения: {str(e)}")
         else:
@@ -248,6 +275,10 @@ if st.session_state.authenticated and not st.session_state.api_key_verified:
 # ------------------ ОСНОВНОЕ ПРИЛОЖЕНИЕ ------------------
 st.markdown(f"<h1 class='main-header'>🌿 Здравствуй, {PROFILE['name']}!</h1>", unsafe_allow_html=True)
 st.markdown("<p class='sub-header'>Ты — главный герой своей жизни ✨</p>", unsafe_allow_html=True)
+
+# Отладочная информация (показываем только если есть ошибка)
+if st.session_state.debug_info and "Ошибка" in st.session_state.debug_info:
+    st.markdown("<div class='debug-box'>" + st.session_state.debug_info + "</div>", unsafe_allow_html=True)
 
 # Фокусы
 focus_week = "❓ Спланируйте неделю, чтобы задать фокус"
