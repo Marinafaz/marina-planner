@@ -542,10 +542,10 @@ if page == "Главная":
     # Генерация плана из мыслей
     if not st.session_state.daily_plan_generated:
         st.markdown("<div class='thought-input'>", unsafe_allow_html=True)
-        st.markdown("#### ✍️ Напиши свои мысли на сегодня")
-        st.markdown("*Что у тебя в голове? Что нужно сделать, что беспокоит, что хочется? Просто выгрузи всё сюда.*")
+        st.markdown("#### 📌 Что сегодня важно?")
+        st.markdown("*Напиши самое главное, что нужно сделать. Я помогу разложить это по времени и добавить заботу о себе.*")
         
-        thoughts = st.text_area("Мои мысли:", height=150, key="thoughts_input")
+        thoughts = st.text_area("Мои задачи на сегодня:", height=150, key="thoughts_input")
         st.session_state.thoughts = thoughts
         
         if st.button("🧠 Собрать план из моих мыслей"):
@@ -560,7 +560,7 @@ if page == "Главная":
                     st.session_state.daily_plan_generated = True
                     st.rerun()
             else:
-                st.warning("Напиши свои мысли, чтобы я могла составить план.")
+                st.warning("Напиши свои задачи, чтобы я могла составить план.")
         st.markdown("</div>", unsafe_allow_html=True)
     
     # Диалог с правками плана
