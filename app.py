@@ -257,7 +257,7 @@ if not st.session_state.authenticated:
     password = st.text_input("Введите пароль", type="password", key="login_password")
     
     if st.button("Войти"):
-        if password == "botiamhappy":
+        if password == "bih":
             st.session_state.authenticated = True
             st.rerun()
         else:
