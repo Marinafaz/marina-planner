@@ -120,16 +120,11 @@ st.markdown("""
         border: 1px dashed #7BAF8A;
         margin-top: 1rem;
     }
-    .debug-box {
-        background: #FFF3CD;
+    .thought-input {
+        background: #FFF8F0;
+        border-radius: 15px;
         padding: 1rem;
-        border-radius: 10px;
-        border-left: 5px solid #FFC107;
-        margin: 1rem 0;
-        font-family: monospace;
-        font-size: 0.9rem;
-        white-space: pre-wrap;
-        word-break: break-all;
+        border-left: 5px solid #D4A373;
     }
 </style>
 """, unsafe_allow_html=True)
@@ -185,8 +180,10 @@ if "daily_plan_dialog" not in st.session_state:
     st.session_state.daily_plan_dialog = []
 if "editing_entry" not in st.session_state:
     st.session_state.editing_entry = None
-if "debug_info" not in st.session_state:
-    st.session_state.debug_info = ""
+if "thoughts" not in st.session_state:
+    st.session_state.thoughts = ""
+if "daily_plan_generated" not in st.session_state:
+    st.session_state.daily_plan_generated = False
 
 # ------------------ ФУНКЦИИ ДЛЯ РАБОТЫ С ИИ ------------------
 def call_deepseek(prompt, api_key):
@@ -201,26 +198,56 @@ def call_deepseek(prompt, api_key):
             "messages": [{"role": "user", "content": prompt}],
             "temperature": 0.7
         }
-        
-        # Сохраняем отладочную информацию
-        debug_msg = f"🔑 Ключ (первые 10 символов): {api_key[:10]}...\n"
-        debug_msg += f"📤 Запрос к: {url}\n"
-        debug_msg += f"📦 Модель: deepseek-v4-pro\n"
-        
         response = requests.post(url, headers=headers, json=data, timeout=30)
-        
-        debug_msg += f"📊 Статус: {response.status_code}\n"
-        debug_msg += f"📄 Ответ: {response.text[:500]}"
-        
-        st.session_state.debug_info = debug_msg
-        
         if response.status_code == 200:
             return response.json()["choices"][0]["message"]["content"]
         else:
-            return f"Ошибка: {response.status_code}\n\n{response.text}"
+            return f"Ошибка: {response.status_code}"
     except Exception as e:
-        st.session_state.debug_info = f"❌ Исключение: {str(e)}"
         return f"Ошибка: {str(e)}"
+
+def generate_daily_plan_from_thoughts(thoughts, profile, api_key):
+    prompt = f"""
+    Ты — личный коуч Марины.
+    Вот её профиль:
+    - Цели на 5 лет: {', '.join(profile['goals_5_years'])}
+    - Привычки: {', '.join(profile['habits'])}
+    - Идеальный день: {', '.join(profile['ideal_day'])}
+    
+    Марина написала свои мысли на сегодня:
+    "{thoughts}"
+    
+    Задача:
+    1. Проанализируй её мысли.
+    2. Сопоставь с её целями и привычками.
+    3. Составь структурированный план на сегодня в виде списка (используй маркеры • или -).
+    4. После плана задай вопрос: "Марина, я составила такой план. Что хочешь добавить, убрать или изменить?"
+    
+    Отвечай на русском, тёпло, поддерживающе.
+    """
+    return call_deepseek(prompt, api_key)
+
+def refine_daily_plan(plan, user_feedback, profile, api_key):
+    prompt = f"""
+    Ты — личный коуч Марины.
+    Вот её профиль:
+    - Цели: {', '.join(profile['goals_5_years'])}
+    - Привычки: {', '.join(profile['habits'])}
+    
+    Ты составила такой план:
+    {plan}
+    
+    Марина ответила:
+    "{user_feedback}"
+    
+    Задача:
+    1. Учти её замечания.
+    2. Обнови план в виде списка.
+    3. Спроси, всё ли теперь устраивает.
+    
+    Отвечай на русском, тёпло, поддерживающе.
+    """
+    return call_deepseek(prompt, api_key)
 
 # ------------------ АВТОРИЗАЦИЯ (ДВУХЭТАПНАЯ) ------------------
 if not st.session_state.authenticated:
@@ -237,7 +264,6 @@ if not st.session_state.authenticated:
             st.error("❌ Неверный пароль.")
     st.stop()
 
-# Если пароль введён, но ключ ещё не введён
 if st.session_state.authenticated and not st.session_state.api_key_verified:
     st.markdown("<h1 class='main-header'>🌿 Марина: Планер жизни</h1>", unsafe_allow_html=True)
     st.markdown("<p class='sub-header'>Введите API-ключ Polza.ai</p>", unsafe_allow_html=True)
@@ -246,7 +272,6 @@ if st.session_state.authenticated and not st.session_state.api_key_verified:
     
     if st.button("Подтвердить ключ"):
         if api_key_input.startswith("pza_"):
-            # Проверяем ключ через тестовый запрос
             try:
                 url = "https://api.polza.ai/v1/chat/completions"
                 headers = {
@@ -262,12 +287,11 @@ if st.session_state.authenticated and not st.session_state.api_key_verified:
                 if response.status_code == 200:
                     st.session_state.api_key = api_key_input
                     st.session_state.api_key_verified = True
-                    st.session_state.debug_info = "✅ Ключ успешно проверен!"
                     st.rerun()
                 else:
-                    st.error(f"❌ API-ключ неверный или неактивный.\nСтатус: {response.status_code}\nОтвет: {response.text[:200]}")
+                    st.error(f"❌ API-ключ неверный. Статус: {response.status_code}")
             except Exception as e:
-                st.error(f"❌ Ошибка подключения: {str(e)}")
+                st.error(f"❌ Ошибка: {str(e)}")
         else:
             st.error("❌ Неверный формат ключа. Он должен начинаться с 'pza_'.")
     st.stop()
@@ -275,10 +299,6 @@ if st.session_state.authenticated and not st.session_state.api_key_verified:
 # ------------------ ОСНОВНОЕ ПРИЛОЖЕНИЕ ------------------
 st.markdown(f"<h1 class='main-header'>🌿 Здравствуй, {PROFILE['name']}!</h1>", unsafe_allow_html=True)
 st.markdown("<p class='sub-header'>Ты — главный герой своей жизни ✨</p>", unsafe_allow_html=True)
-
-# Отладочная информация (показываем только если есть ошибка)
-if st.session_state.debug_info and "Ошибка" in st.session_state.debug_info:
-    st.markdown("<div class='debug-box'>" + st.session_state.debug_info + "</div>", unsafe_allow_html=True)
 
 # Фокусы
 focus_week = "❓ Спланируйте неделю, чтобы задать фокус"
@@ -292,11 +312,12 @@ st.markdown(f"<div class='focus-text'>🎯 Фокус недели: {focus_week}
 st.markdown(f"<div class='focus-text'>🎯 Фокус месяца: {focus_month}</div>", unsafe_allow_html=True)
 st.divider()
 
-# Меню (5 кнопок)
+# Меню
 col1, col2, col3, col4, col5 = st.columns(5)
 with col1:
     if st.button("🏠 Главная", use_container_width=True):
         st.session_state.current_page = "Главная"
+        st.session_state.daily_plan_generated = False
 with col2:
     if st.button("📝 Победы", use_container_width=True):
         st.session_state.current_page = "Победы"
@@ -316,82 +337,73 @@ st.divider()
 page = st.session_state.current_page
 
 if page == "Главная":
-    st.markdown("### ☀️ План на сегодня")
+    st.markdown("### ☀️ Мой план на сегодня")
     
     if not st.session_state.data.get("weekly_plan"):
-        st.info("📌 У тебя пока нет плана на неделю. Перейди в раздел «Планы», чтобы создать его, или просто начни с плана на сегодня.")
+        st.info("📌 У тебя пока нет плана на неделю. Перейди в раздел «Планы», чтобы создать его.")
     
-    if st.button("✨ Создать план на сегодня"):
-        with st.spinner("Генерирую план для тебя..."):
-            weekly_plan = st.session_state.data.get("weekly_plan")
-            if weekly_plan:
-                prompt = f"""
-                Ты — личный коуч Марины.
-                Сегодня {datetime.datetime.now().strftime('%A, %d %B')}.
-                План на неделю: {weekly_plan}
-                Составь план на сегодня в виде списка задач.
-                После плана спроси, что она хочет добавить или скорректировать.
-                """
+    if not st.session_state.daily_plan_generated:
+        st.markdown("<div class='thought-input'>", unsafe_allow_html=True)
+        st.markdown("#### ✍️ Напиши свои мысли на сегодня")
+        st.markdown("*Что у тебя в голове? Что нужно сделать, что беспокоит, что хочется? Просто выгрузи всё сюда.*")
+        
+        thoughts = st.text_area("Мои мысли:", height=150, key="thoughts_input")
+        st.session_state.thoughts = thoughts
+        
+        if st.button("🧠 Собрать план из моих мыслей"):
+            if st.session_state.thoughts.strip():
+                with st.spinner("Анализирую твои мысли, Марина..."):
+                    plan = generate_daily_plan_from_thoughts(
+                        st.session_state.thoughts,
+                        PROFILE,
+                        st.session_state.api_key
+                    )
+                    st.session_state.daily_plan_dialog = [{"role": "assistant", "content": plan}]
+                    st.session_state.daily_plan_generated = True
+                    st.rerun()
             else:
-                prompt = f"""
-                Ты — личный коуч Марины.
-                Сегодня {datetime.datetime.now().strftime('%A, %d %B')}.
-                У Марины пока нет плана на неделю, но она хочет спланировать сегодняшний день.
-                Составь план на сегодня в виде списка задач, основываясь на её привычках и целях.
-                После плана спроси, что она хочет добавить или скорректировать.
-                """
-            plan = call_deepseek(prompt, st.session_state.api_key)
-            st.session_state.daily_plan_dialog = [{"role": "assistant", "content": plan}]
+                st.warning("Напиши свои мысли, чтобы я могла составить план.")
+        st.markdown("</div>", unsafe_allow_html=True)
     
-    if st.session_state.daily_plan_dialog:
+    if st.session_state.daily_plan_generated and st.session_state.daily_plan_dialog:
+        st.markdown("### 📋 Предлагаемый план")
+        
         for msg in st.session_state.daily_plan_dialog:
             if msg["role"] == "user":
                 st.markdown(f"<div class='chat-message chat-message-user'>👤 {msg['content']}</div>", unsafe_allow_html=True)
             else:
                 st.markdown(f"<div class='chat-message'>🌿 {msg['content']}</div>", unsafe_allow_html=True)
         
-        user_response = st.text_input("Ваш ответ:", key="daily_plan_input")
-        col_voice, col_send = st.columns([1, 4])
-        with col_voice:
-            st.markdown("""
-            <button class="voice-btn" onclick="startVoiceInput('daily_plan_input')">🎤</button>
-            <script>
-                function startVoiceInput(fieldId) {
-                    const input = window.parent.document.querySelector(`input[key="${fieldId}"]`);
-                    if (!input) return;
-                    const recognition = new (window.SpeechRecognition || window.webkitSpeechRecognition)();
-                    recognition.lang = 'ru-RU';
-                    recognition.onresult = function(event) {
-                        const transcript = event.results[0][0].transcript;
-                        input.value = transcript;
-                        const event = new Event('input', { bubbles: true });
-                        input.dispatchEvent(event);
-                    };
-                    recognition.start();
-                }
-            </script>
-            """, unsafe_allow_html=True)
-        with col_send:
-            if st.button("Отправить", key="daily_send"):
-                if user_response.strip():
-                    st.session_state.daily_plan_dialog.append({"role": "user", "content": user_response})
-                    prompt = f"""
-                    Ты — коуч Марины.
-                    План: {st.session_state.daily_plan_dialog[0]['content']}
-                    Марина ответила: {user_response}
-                    Отреагируй и предложи обновлённый план или скажи сохранить.
-                    """
-                    response = call_deepseek(prompt, st.session_state.api_key)
-                    st.session_state.daily_plan_dialog.append({"role": "assistant", "content": response})
-                    st.rerun()
-        
-        if st.button("💾 Сохранить план дня"):
-            st.session_state.data["daily_plan"] = st.session_state.daily_plan_dialog[0]["content"]
-            save_data(st.session_state.data)
-            st.success("✅ План на сегодня сохранён!")
+        user_feedback = st.text_input("Твой ответ (добавить/убрать/изменить):", key="daily_feedback")
+        col1, col2 = st.columns(2)
+        with col1:
+            if st.button("📩 Отправить правки"):
+                if user_feedback.strip():
+                    with st.spinner("Обновляю план..."):
+                        plan_text = st.session_state.daily_plan_dialog[0]["content"]
+                        refined = refine_daily_plan(
+                            plan_text,
+                            user_feedback,
+                            PROFILE,
+                            st.session_state.api_key
+                        )
+                        st.session_state.daily_plan_dialog.append({"role": "user", "content": user_feedback})
+                        st.session_state.daily_plan_dialog.append({"role": "assistant", "content": refined})
+                        st.rerun()
+                else:
+                    st.warning("Напиши, что хочешь изменить.")
+        with col2:
+            if st.button("💾 Сохранить план дня"):
+                if st.session_state.daily_plan_dialog:
+                    for msg in reversed(st.session_state.daily_plan_dialog):
+                        if msg["role"] == "assistant" and "план" in msg["content"].lower():
+                            st.session_state.data["daily_plan"] = msg["content"]
+                            save_data(st.session_state.data)
+                            st.success("✅ План на сегодня сохранён!")
+                            break
     
-    if st.session_state.data.get("daily_plan"):
-        st.markdown("### 📋 Текущий план на сегодня")
+    if st.session_state.data.get("daily_plan") and not st.session_state.daily_plan_generated:
+        st.markdown("### 📋 Сохранённый план на сегодня")
         plan_text = st.session_state.data["daily_plan"]
         lines = plan_text.split("\n")
         for line in lines:
@@ -401,7 +413,6 @@ if page == "Главная":
                 else:
                     st.markdown(f"<div class='win-entry'>• {line.strip()}</div>", unsafe_allow_html=True)
     
-    # БЛОК БЭКАПА
     st.divider()
     st.markdown("### 📦 Управление данными")
     with st.container():
