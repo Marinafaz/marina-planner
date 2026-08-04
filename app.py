@@ -222,7 +222,8 @@ if not st.session_state.authenticated:
     if st.button("Войти"):
         if password == "botiamhappy":
             st.session_state.authenticated = True
-            st.session_state.api_key = "pza_yAqWmDOziy1VyB24o9wzPSH48ko9G-1V"
+            # НОВЫЙ КЛЮЧ
+            st.session_state.api_key = "pza_X3mIB8n6SdL35mn-ZI3QiRLMRwJ_ES1i"
             if remember:
                 st.markdown(f"""
                 <script>
@@ -355,9 +356,7 @@ if page == "Главная":
         col1, col2 = st.columns(2)
         with col1:
             if st.button("💾 Скачать резервную копию", use_container_width=True):
-                # Создаём JSON-строку
                 json_str = json.dumps(st.session_state.data, ensure_ascii=False, indent=2, default=str)
-                # Преобразуем в base64 для скачивания
                 b64 = base64.b64encode(json_str.encode()).decode()
                 filename = f"marina_backup_{dt.now().strftime('%Y-%m-%d')}.json"
                 href = f'<a href="data:application/json;base64,{b64}" download="{filename}" style="text-decoration:none;background:#7BAF8A;color:white;padding:0.5rem 1rem;border-radius:30px;display:inline-block;">📥 Скачать</a>'
