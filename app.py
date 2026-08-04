@@ -222,7 +222,7 @@ if not st.session_state.authenticated:
     if st.button("Войти"):
         if password == "botiamhappy":
             st.session_state.authenticated = True
-            # НОВЫЙ КЛЮЧ
+            # ВСТАВЛЯЕМ КЛЮЧ СЮДА
             st.session_state.api_key = "pza_X3mIB8n6SdL35mn-ZI3QiRLMRwJ_ES1i"
             if remember:
                 st.markdown(f"""
