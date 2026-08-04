@@ -160,6 +160,8 @@ if "authenticated" not in st.session_state:
     st.session_state.authenticated = False
 if "api_key" not in st.session_state:
     st.session_state.api_key = ""
+if "api_key_verified" not in st.session_state:
+    st.session_state.api_key_verified = False
 if "data" not in st.session_state:
     st.session_state.data = load_data()
 if "current_page" not in st.session_state:
@@ -194,44 +196,53 @@ def call_deepseek(prompt, api_key):
     except Exception as e:
         return f"Ошибка: {str(e)}"
 
-# ------------------ АВТОРИЗАЦИЯ ------------------
-st.markdown("""
-<script>
-    function loadPassword() {
-        const pwd = localStorage.getItem('marina_password');
-        if (pwd) {
-            const input = window.parent.document.querySelector('input[type="password"]');
-            if (input) {
-                input.value = pwd;
-                const btn = window.parent.document.querySelector('button:has(> div:contains("Войти"))');
-                if (btn) btn.click();
-            }
-        }
-    }
-    setTimeout(loadPassword, 1000);
-</script>
-""", unsafe_allow_html=True)
-
+# ------------------ АВТОРИЗАЦИЯ (ДВУХЭТАПНАЯ) ------------------
 if not st.session_state.authenticated:
     st.markdown("<h1 class='main-header'>🌿 Марина: Планер жизни</h1>", unsafe_allow_html=True)
     st.markdown("<p class='sub-header'>Войди, чтобы продолжить</p>", unsafe_allow_html=True)
     
     password = st.text_input("Введите пароль", type="password", key="login_password")
-    remember = st.checkbox("Запомнить меня (пароль сохранится в браузере)")
     
     if st.button("Войти"):
         if password == "botiamhappy":
             st.session_state.authenticated = True
-            st.session_state.api_key = "pza_X3mIB8n6SdL35mn-ZI3QiRLMRwJ_ES1i"
-            if remember:
-                st.markdown(f"""
-                <script>
-                    localStorage.setItem('marina_password', '{password}');
-                </script>
-                """, unsafe_allow_html=True)
             st.rerun()
         else:
             st.error("❌ Неверный пароль.")
+    st.stop()
+
+# Если пароль введён, но ключ ещё не введён
+if st.session_state.authenticated and not st.session_state.api_key_verified:
+    st.markdown("<h1 class='main-header'>🌿 Марина: Планер жизни</h1>", unsafe_allow_html=True)
+    st.markdown("<p class='sub-header'>Введите API-ключ Polza.ai</p>", unsafe_allow_html=True)
+    
+    api_key_input = st.text_input("Введите API-ключ:", type="password", key="api_key_input")
+    
+    if st.button("Подтвердить ключ"):
+        if api_key_input.startswith("pza_"):
+            # Проверяем ключ через тестовый запрос
+            try:
+                url = "https://api.polza.ai/v1/chat/completions"
+                headers = {
+                    "Authorization": f"Bearer {api_key_input}",
+                    "Content-Type": "application/json"
+                }
+                data = {
+                    "model": "deepseek-v4-pro",
+                    "messages": [{"role": "user", "content": "Привет"}],
+                    "temperature": 0.7
+                }
+                response = requests.post(url, headers=headers, json=data, timeout=10)
+                if response.status_code == 200:
+                    st.session_state.api_key = api_key_input
+                    st.session_state.api_key_verified = True
+                    st.rerun()
+                else:
+                    st.error("❌ API-ключ неверный или неактивный. Проверьте его в Polza.ai.")
+            except Exception as e:
+                st.error(f"❌ Ошибка подключения: {str(e)}")
+        else:
+            st.error("❌ Неверный формат ключа. Он должен начинаться с 'pza_'.")
     st.stop()
 
 # ------------------ ОСНОВНОЕ ПРИЛОЖЕНИЕ ------------------
@@ -276,7 +287,6 @@ page = st.session_state.current_page
 if page == "Главная":
     st.markdown("### ☀️ План на сегодня")
     
-    # Проверяем, есть ли план на неделю
     if not st.session_state.data.get("weekly_plan"):
         st.info("📌 У тебя пока нет плана на неделю. Перейди в раздел «Планы», чтобы создать его, или просто начни с плана на сегодня.")
     
