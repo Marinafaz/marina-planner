@@ -222,7 +222,6 @@ if not st.session_state.authenticated:
     if st.button("Войти"):
         if password == "botiamhappy":
             st.session_state.authenticated = True
-            # ВСТАВЛЯЕМ КЛЮЧ СЮДА
             st.session_state.api_key = "pza_X3mIB8n6SdL35mn-ZI3QiRLMRwJ_ES1i"
             if remember:
                 st.markdown(f"""
@@ -251,8 +250,8 @@ st.markdown(f"<div class='focus-text'>🎯 Фокус недели: {focus_week}
 st.markdown(f"<div class='focus-text'>🎯 Фокус месяца: {focus_month}</div>", unsafe_allow_html=True)
 st.divider()
 
-# Меню
-col1, col2, col3, col4 = st.columns(4)
+# Меню (5 кнопок)
+col1, col2, col3, col4, col5 = st.columns(5)
 with col1:
     if st.button("🏠 Главная", use_container_width=True):
         st.session_state.current_page = "Главная"
@@ -263,6 +262,9 @@ with col3:
     if st.button("📊 Итоги", use_container_width=True):
         st.session_state.current_page = "Итоги"
 with col4:
+    if st.button("📋 Планы", use_container_width=True):
+        st.session_state.current_page = "Планы"
+with col5:
     if st.button("🎯 Цели", use_container_width=True):
         st.session_state.current_page = "Цели"
 
@@ -274,19 +276,29 @@ page = st.session_state.current_page
 if page == "Главная":
     st.markdown("### ☀️ План на сегодня")
     
+    # Проверяем, есть ли план на неделю
+    if not st.session_state.data.get("weekly_plan"):
+        st.info("📌 У тебя пока нет плана на неделю. Перейди в раздел «Планы», чтобы создать его, или просто начни с плана на сегодня.")
+    
     if st.button("✨ Создать план на сегодня"):
         with st.spinner("Генерирую план для тебя..."):
             weekly_plan = st.session_state.data.get("weekly_plan")
-            if not weekly_plan:
-                st.warning("Сначала создай план на неделю в разделе «Планы»!")
-                st.stop()
-            prompt = f"""
-            Ты — личный коуч Марины.
-            Сегодня {datetime.datetime.now().strftime('%A, %d %B')}.
-            План на неделю: {weekly_plan}
-            Составь план на сегодня в виде списка задач.
-            После плана спроси, что она хочет добавить или скорректировать.
-            """
+            if weekly_plan:
+                prompt = f"""
+                Ты — личный коуч Марины.
+                Сегодня {datetime.datetime.now().strftime('%A, %d %B')}.
+                План на неделю: {weekly_plan}
+                Составь план на сегодня в виде списка задач.
+                После плана спроси, что она хочет добавить или скорректировать.
+                """
+            else:
+                prompt = f"""
+                Ты — личный коуч Марины.
+                Сегодня {datetime.datetime.now().strftime('%A, %d %B')}.
+                У Марины пока нет плана на неделю, но она хочет спланировать сегодняшний день.
+                Составь план на сегодня в виде списка задач, основываясь на её привычках и целях.
+                После плана спроси, что она хочет добавить или скорректировать.
+                """
             plan = call_deepseek(prompt, st.session_state.api_key)
             st.session_state.daily_plan_dialog = [{"role": "assistant", "content": plan}]
     
@@ -500,6 +512,96 @@ elif page == "Итоги":
                 """
                 analysis = call_deepseek(prompt, st.session_state.api_key)
                 st.markdown(f"<div class='card'>{analysis}</div>", unsafe_allow_html=True)
+
+elif page == "Планы":
+    st.markdown("### 📋 Планирование")
+    
+    tab1, tab2 = st.tabs(["📅 Неделя", "📆 Месяц"])
+    
+    with tab1:
+        st.markdown("#### План на неделю")
+        
+        if st.button("🗓️ Начать планирование недели"):
+            st.session_state.planning_mode = "week"
+            st.session_state.chat_history = [
+                {"role": "assistant", "content": "Привет, Марина! Давай спланируем твою неделю. Расскажи, какие у тебя ключевые задачи, встречи или события на этой неделе? Также скажи, что ты хочешь попробовать новое (например, добавить зарядку, выделить время для себя)."}
+            ]
+        
+        if st.session_state.planning_mode == "week":
+            for msg in st.session_state.chat_history:
+                if msg["role"] == "user":
+                    st.markdown(f"<div class='chat-message chat-message-user'>👤 {msg['content']}</div>", unsafe_allow_html=True)
+                else:
+                    st.markdown(f"<div class='chat-message'>🌿 {msg['content']}</div>", unsafe_allow_html=True)
+            
+            user_input = st.text_input("Ваше сообщение:", key="week_chat_input")
+            if st.button("Отправить", key="week_send"):
+                if user_input.strip():
+                    st.session_state.chat_history.append({"role": "user", "content": user_input})
+                    history_text = "\n".join([f"{m['role']}: {m['content']}" for m in st.session_state.chat_history])
+                    prompt = f"""
+                    Ты — коуч Марины.
+                    Вот диалог:
+                    {history_text}
+                    
+                    Ответь Марине:
+                    - Если она говорит о неудаче — сначала спроси, что помешало, почему не получилось.
+                    - Если она говорит о планах — помоги структурировать их по дням недели.
+                    - Если она согласна с планом — предложи сохранить его.
+                    - Отвечай на русском, тёпло, поддерживающе.
+                    """
+                    response = call_deepseek(prompt, st.session_state.api_key)
+                    st.session_state.chat_history.append({"role": "assistant", "content": response})
+                    st.rerun()
+            
+            if st.button("💾 Сохранить план недели"):
+                plan = "\n".join([m["content"] for m in st.session_state.chat_history if m["role"] == "assistant"])
+                st.session_state.data["weekly_plan"] = plan
+                save_data(st.session_state.data)
+                st.success("✅ План недели сохранён!")
+                st.session_state.planning_mode = None
+    
+    with tab2:
+        st.markdown("#### План на месяц")
+        
+        if st.button("🗓️ Начать планирование месяца"):
+            st.session_state.planning_mode = "month"
+            st.session_state.chat_history = [
+                {"role": "assistant", "content": "Привет, Марина! Давай спланируем твой месяц. Расскажи, какие у тебя ключевые события, поездки или цели на этот месяц? Что ты хочешь успеть?"}
+            ]
+        
+        if st.session_state.planning_mode == "month":
+            for msg in st.session_state.chat_history:
+                if msg["role"] == "user":
+                    st.markdown(f"<div class='chat-message chat-message-user'>👤 {msg['content']}</div>", unsafe_allow_html=True)
+                else:
+                    st.markdown(f"<div class='chat-message'>🌿 {msg['content']}</div>", unsafe_allow_html=True)
+            
+            user_input = st.text_input("Ваше сообщение:", key="month_chat_input")
+            if st.button("Отправить", key="month_send"):
+                if user_input.strip():
+                    st.session_state.chat_history.append({"role": "user", "content": user_input})
+                    history_text = "\n".join([f"{m['role']}: {m['content']}" for m in st.session_state.chat_history])
+                    prompt = f"""
+                    Ты — коуч Марины.
+                    Вот диалог:
+                    {history_text}
+                    
+                    Ответь Марине:
+                    - Помоги структурировать цели по неделям месяца.
+                    - Если она говорит о неудаче — сначала спроси, что помешало.
+                    - Отвечай на русском, тёпло, поддерживающе.
+                    """
+                    response = call_deepseek(prompt, st.session_state.api_key)
+                    st.session_state.chat_history.append({"role": "assistant", "content": response})
+                    st.rerun()
+            
+            if st.button("💾 Сохранить план месяца"):
+                plan = "\n".join([m["content"] for m in st.session_state.chat_history if m["role"] == "assistant"])
+                st.session_state.data["monthly_plan"] = plan
+                save_data(st.session_state.data)
+                st.success("✅ План месяца сохранён!")
+                st.session_state.planning_mode = None
 
 elif page == "Цели":
     st.markdown("### 🎯 Мои цели")
