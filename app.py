@@ -254,12 +254,14 @@ if "checklist_completed" not in st.session_state:
     st.session_state.checklist_completed = []
 if "evening_checklist_active" not in st.session_state:
     st.session_state.evening_checklist_active = False
-if "awaiting_focus_input" not in st.session_state:
-    st.session_state.awaiting_focus_input = False
 if "focus_suggestion" not in st.session_state:
     st.session_state.focus_suggestion = ""
 if "focus_confirmed" not in st.session_state:
     st.session_state.focus_confirmed = False
+if "focus_dialog" not in st.session_state:
+    st.session_state.focus_dialog = []
+if "focus_dialog_active" not in st.session_state:
+    st.session_state.focus_dialog_active = False
 
 # ------------------ ФУНКЦИИ ДЛЯ РАБОТЫ С ИИ ------------------
 def call_deepseek(prompt, api_key, retries=2):
@@ -297,7 +299,6 @@ def call_deepseek(prompt, api_key, retries=2):
     return "Ошибка: Не удалось получить ответ после нескольких попыток."
 
 def generate_focus_from_plan(plan, profile, api_key):
-    """Генерирует фокус месяца из плана"""
     prompt = f"""
     Ты — личный коуч Марины.
     Вот её цели на 5 лет: {', '.join(profile['goals_5_years'])}
@@ -309,6 +310,26 @@ def generate_focus_from_plan(plan, profile, api_key):
     Сформулируй ОДНИМ ПРЕДЛОЖЕНИЕМ (максимум 2) главный фокус этого месяца.
     Фокус должен отражать самую важную цель или намерение из плана.
     Отвечай на русском, коротко, вдохновляюще.
+    """
+    return call_deepseek(prompt, api_key)
+
+def refine_focus_in_dialog(focus, user_message, profile, api_key):
+    prompt = f"""
+    Ты — личный коуч Марины.
+    Вот её цели на 5 лет: {', '.join(profile['goals_5_years'])}
+    
+    Ты предложила такой фокус месяца:
+    "{focus}"
+    
+    Марина сказала:
+    "{user_message}"
+    
+    Задача:
+    1. Учти её замечания.
+    2. Предложи обновлённый фокус (1-2 предложения).
+    3. Спроси, так ли она видит свой фокус.
+    
+    Отвечай на русском, тёпло, поддерживающе.
     """
     return call_deepseek(prompt, api_key)
 
@@ -543,6 +564,7 @@ with col4:
         st.session_state.week_planning_active = False
         st.session_state.month_planning_active = False
         st.session_state.focus_confirmed = False
+        st.session_state.focus_dialog_active = False
 with col5:
     if st.button("🎯 Цели", use_container_width=True):
         st.session_state.current_page = "Цели"
@@ -843,36 +865,68 @@ elif page == "Планы":
                     st.markdown(f"<div class='win-entry'>{line.strip()}</div>", unsafe_allow_html=True)
             st.divider()
         
-        # Если есть предложение фокуса и оно не подтверждено
-        if st.session_state.focus_suggestion and not st.session_state.focus_confirmed:
-            st.markdown("### 🎯 Фокус месяца")
+        # Если есть предложение фокуса и диалог активен
+        if st.session_state.focus_suggestion and st.session_state.focus_dialog_active:
+            st.markdown("### 🎯 Обсуждение фокуса месяца")
+            for msg in st.session_state.focus_dialog:
+                if msg["role"] == "user":
+                    st.markdown(f"<div class='chat-message chat-message-user'>👤 {msg['content']}</div>", unsafe_allow_html=True)
+                else:
+                    st.markdown(f"<div class='chat-message'>🌿 {msg['content']}</div>", unsafe_allow_html=True)
+            
+            user_input = st.text_input("Твой ответ:", key="focus_dialog_input")
+            col1, col2 = st.columns(2)
+            with col1:
+                if st.button("📩 Отправить", key="focus_send"):
+                    if user_input.strip():
+                        st.session_state.focus_dialog.append({"role": "user", "content": user_input})
+                        with st.spinner("Думаю..."):
+                            response = refine_focus_in_dialog(
+                                st.session_state.focus_suggestion,
+                                user_input,
+                                PROFILE,
+                                st.session_state.api_key
+                            )
+                            st.session_state.focus_dialog.append({"role": "assistant", "content": response})
+                            # Обновляем предложение фокуса
+                            st.session_state.focus_suggestion = response
+                            st.rerun()
+                    else:
+                        st.warning("Напиши сообщение!")
+            with col2:
+                if st.button("✅ Сохранить этот фокус"):
+                    # Извлекаем последний фокус из диалога
+                    for msg in reversed(st.session_state.focus_dialog):
+                        if msg["role"] == "assistant":
+                            focus = msg["content"]
+                            break
+                    st.session_state.data["monthly_focus"] = focus
+                    if save_data_to_supabase(st.session_state.data):
+                        st.success("✅ Фокус месяца сохранён!")
+                        st.session_state.focus_dialog_active = False
+                        st.session_state.focus_suggestion = ""
+                        st.rerun()
+        
+        # Если есть предложение фокуса, но диалог ещё не начат
+        elif st.session_state.focus_suggestion and not st.session_state.focus_confirmed and not st.session_state.focus_dialog_active:
+            st.markdown("### 🎯 Предлагаемый фокус месяца")
             st.info(f"💡 {st.session_state.focus_suggestion}")
             col1, col2 = st.columns(2)
             with col1:
-                if st.button("✅ Да, подходит"):
+                if st.button("✅ Подходит"):
                     st.session_state.data["monthly_focus"] = st.session_state.focus_suggestion
                     if save_data_to_supabase(st.session_state.data):
                         st.success("✅ Фокус месяца сохранён!")
                         st.session_state.focus_confirmed = True
-                        st.rerun()
-            with col2:
-                if st.button("✏️ Скорректировать"):
-                    st.session_state.awaiting_focus_input = True
-                    st.session_state.focus_confirmed = False
-                    st.rerun()
-        
-        if st.session_state.awaiting_focus_input:
-            new_focus = st.text_input("Напиши свой вариант фокуса месяца:")
-            if st.button("Сохранить мой вариант"):
-                if new_focus.strip():
-                    st.session_state.data["monthly_focus"] = new_focus.strip()
-                    if save_data_to_supabase(st.session_state.data):
-                        st.success("✅ Фокус месяца сохранён!")
-                        st.session_state.awaiting_focus_input = False
                         st.session_state.focus_suggestion = ""
                         st.rerun()
-                else:
-                    st.warning("Напиши фокус.")
+            with col2:
+                if st.button("🔄 Обсудить"):
+                    st.session_state.focus_dialog_active = True
+                    st.session_state.focus_dialog = [
+                        {"role": "assistant", "content": f"Ты предложила такой фокус: \"{st.session_state.focus_suggestion}\". Что именно тебе не нравится? Давай вместе его улучшим."}
+                    ]
+                    st.rerun()
         
         if not st.session_state.month_planning_active:
             if st.button("🗓️ Начать планирование месяца"):
@@ -916,11 +970,11 @@ elif page == "Планы":
                         st.session_state.data["monthly_plan"] = plan
                         if save_data_to_supabase(st.session_state.data):
                             st.success("✅ План месяца сохранён!")
-                            # Генерируем фокус
                             with st.spinner("Формулирую фокус месяца..."):
                                 focus = generate_focus_from_plan(plan, PROFILE, st.session_state.api_key)
                                 st.session_state.focus_suggestion = focus
                                 st.session_state.focus_confirmed = False
+                                st.session_state.focus_dialog_active = False
                                 st.session_state.month_planning_active = False
                                 st.rerun()
                         else:
