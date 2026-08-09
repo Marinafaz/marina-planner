@@ -11,28 +11,72 @@ from datetime import datetime as dt
 import plotly.express as px
 import pandas as pd
 
+# ------------------ ПОДКЛЮЧЕНИЕ К SUPABASE ------------------
+SUPABASE_URL = "https://udtmklwqetdndqlplswn.supabase.co"
+SUPABASE_KEY = "sb_publishable_47yrVYMRqKLNVslJ5_PhTA_pUIaeGXu"
+
+def supabase_request(method, endpoint, data=None):
+    """Универсальная функция для запросов к Supabase"""
+    url = f"{SUPABASE_URL}/rest/v1/{endpoint}"
+    headers = {
+        "apikey": SUPABASE_KEY,
+        "Authorization": f"Bearer {SUPABASE_KEY}",
+        "Content-Type": "application/json"
+    }
+    
+    if method == "GET":
+        response = requests.get(url, headers=headers)
+    elif method == "POST":
+        response = requests.post(url, headers=headers, json=data)
+    elif method == "PATCH":
+        response = requests.patch(url, headers=headers, json=data)
+    elif method == "DELETE":
+        response = requests.delete(url, headers=headers)
+    else:
+        return None
+    
+    if response.status_code in [200, 201, 204]:
+        try:
+            return response.json()
+        except:
+            return True
+    else:
+        return None
+
+def load_data_from_supabase():
+    """Загружает данные из Supabase"""
+    result = supabase_request("GET", "user_data?user_id=eq.marina")
+    if result and len(result) > 0:
+        return result[0]["data"]
+    else:
+        # Если данных нет — создаём запись с пустыми данными
+        default_data = {
+            "entries": [],
+            "weekly_plan": None,
+            "monthly_plan": None,
+            "daily_plan": None,
+            "weekly_focus": None,
+            "monthly_focus": None
+        }
+        supabase_request("POST", "user_data", {
+            "user_id": "marina",
+            "data": default_data
+        })
+        return default_data
+
+def save_data_to_supabase(data):
+    """Сохраняет данные в Supabase"""
+    supabase_request("PATCH", f"user_data?user_id=eq.marina", {
+        "data": data,
+        "updated_at": datetime.datetime.now().isoformat()
+    })
+
 # ------------------ НАСТРОЙКИ СТРАНИЦЫ ------------------
 st.set_page_config(
     page_title="Марина: Планер жизни",
     page_icon="🌿",
     layout="wide"
 )
-
-# ------------------ ФАЙЛ ДЛЯ СОХРАНЕНИЯ ДАННЫХ ------------------
-DATA_FILE = "marina_data.json"
-
-def load_data():
-    if os.path.exists(DATA_FILE):
-        try:
-            with open(DATA_FILE, "r", encoding="utf-8") as f:
-                return json.load(f)
-        except:
-            return {"entries": [], "weekly_plan": None, "monthly_plan": None, "daily_plan": None}
-    return {"entries": [], "weekly_plan": None, "monthly_plan": None, "daily_plan": None}
-
-def save_data(data):
-    with open(DATA_FILE, "w", encoding="utf-8") as f:
-        json.dump(data, f, ensure_ascii=False, indent=2, default=str)
 
 # ------------------ СТИЛИ ------------------
 st.markdown("""
@@ -129,13 +173,6 @@ st.markdown("""
         padding: 1rem;
         border-left: 5px solid #D4A373;
     }
-    .checklist-item {
-        background: white;
-        padding: 0.5rem 1rem;
-        border-radius: 10px;
-        margin-bottom: 0.3rem;
-        border-left: 3px solid #7BAF8A;
-    }
 </style>
 """, unsafe_allow_html=True)
 
@@ -179,7 +216,7 @@ if "api_key" not in st.session_state:
 if "api_key_verified" not in st.session_state:
     st.session_state.api_key_verified = False
 if "data" not in st.session_state:
-    st.session_state.data = load_data()
+    st.session_state.data = load_data_from_supabase()
 if "current_page" not in st.session_state:
     st.session_state.current_page = "Главная"
 if "chat_history" not in st.session_state:
@@ -193,10 +230,7 @@ if "editing_entry" not in st.session_state:
 if "thoughts" not in st.session_state:
     st.session_state.thoughts = ""
 if "daily_plan_generated" not in st.session_state:
-    if st.session_state.data.get("daily_plan"):
-        st.session_state.daily_plan_generated = True
-    else:
-        st.session_state.daily_plan_generated = False
+    st.session_state.daily_plan_generated = False
 if "week_planning_active" not in st.session_state:
     st.session_state.week_planning_active = False
 if "month_planning_active" not in st.session_state:
@@ -205,6 +239,8 @@ if "checklist_completed" not in st.session_state:
     st.session_state.checklist_completed = []
 if "evening_checklist_active" not in st.session_state:
     st.session_state.evening_checklist_active = False
+if "awaiting_focus_input" not in st.session_state:
+    st.session_state.awaiting_focus_input = False
 
 # ------------------ ФУНКЦИИ ДЛЯ РАБОТЫ С ИИ ------------------
 def call_deepseek(prompt, api_key, retries=2):
@@ -289,7 +325,7 @@ def refine_daily_plan(plan, user_feedback, profile, api_key):
     """
     return call_deepseek(prompt, api_key)
 
-def get_ai_response_for_planning(chat_history, profile, api_key, planning_type):
+def get_ai_response_for_planning(chat_history, profile, api_key, planning_type, focus_question=False):
     history_text = "\n".join([f"{m['role']}: {m['content']}" for m in chat_history])
     
     if planning_type == "week":
@@ -305,7 +341,7 @@ def get_ai_response_for_planning(chat_history, profile, api_key, planning_type):
         Ответь Марине:
         - Если она пишет задачи — помоги структурировать их по дням недели.
         - Если она говорит о неудаче — сначала спроси, что помешало, почему не получилось.
-        - Если она согласна с планом — предложи сохранить его.
+        - Если она согласна с планом — { "сначала спроси: 'Какой будет главный фокус этой недели? Сформулируй одним предложением.'" if focus_question else "предложи сохранить план." }
         - Отвечай на русском, тёпло, поддерживающе.
         """
     else:
@@ -321,6 +357,7 @@ def get_ai_response_for_planning(chat_history, profile, api_key, planning_type):
         Ответь Марине:
         - Помоги структурировать цели по неделям месяца.
         - Если она говорит о неудаче — сначала спроси, что помешало.
+        - Если она согласна с планом — { "спроси: 'Какой будет главный фокус этого месяца? Сформулируй одним предложением.'" if focus_question else "предложи сохранить план." }
         - Отвечай на русском, тёпло, поддерживающе.
         """
     return call_deepseek(prompt, api_key)
@@ -452,12 +489,8 @@ st.markdown(f"<h1 class='main-header'>🌿 Здравствуй, {PROFILE['name'
 st.markdown("<p class='sub-header'>Ты — главный герой своей жизни ✨</p>", unsafe_allow_html=True)
 
 # Фокусы
-focus_week = "❓ Спланируйте неделю, чтобы задать фокус"
-focus_month = "❓ Спланируйте месяц, чтобы задать фокус"
-if st.session_state.data.get("weekly_plan"):
-    focus_week = st.session_state.data["weekly_plan"].split("\n")[0][:60] + "..." if len(st.session_state.data["weekly_plan"]) > 60 else st.session_state.data["weekly_plan"].split("\n")[0]
-if st.session_state.data.get("monthly_plan"):
-    focus_month = st.session_state.data["monthly_plan"].split("\n")[0][:60] + "..." if len(st.session_state.data["monthly_plan"]) > 60 else st.session_state.data["monthly_plan"].split("\n")[0]
+focus_week = st.session_state.data.get("weekly_focus") or "❓ Спланируйте неделю, чтобы задать фокус"
+focus_month = st.session_state.data.get("monthly_focus") or "❓ Спланируйте месяц, чтобы задать фокус"
 
 st.markdown(f"<div class='focus-text'>🎯 Фокус недели: {focus_week}</div>", unsafe_allow_html=True)
 st.markdown(f"<div class='focus-text'>🎯 Фокус месяца: {focus_month}</div>", unsafe_allow_html=True)
@@ -492,8 +525,7 @@ page = st.session_state.current_page
 if page == "Главная":
     st.markdown("### ☀️ Мой план на сегодня")
     
-    # Показываем сохранённый план, если есть
-    if st.session_state.data.get("daily_plan") and not st.session_state.daily_plan_generated:
+    if st.session_state.data.get("daily_plan"):
         st.markdown("### 📋 Сохранённый план на сегодня")
         plan_text = st.session_state.data["daily_plan"]
         lines = plan_text.split("\n")
@@ -504,13 +536,11 @@ if page == "Главная":
                 else:
                     st.markdown(f"<div class='win-entry'>• {line.strip()}</div>", unsafe_allow_html=True)
         
-        # Кнопка для вечернего чек-листа
         if st.button("🌙 Вечерний чек-лист (отметить, что сделано)"):
             st.session_state.evening_checklist_active = True
             st.session_state.checklist_completed = []
             st.rerun()
     
-    # Чек-лист выполнения плана
     if st.session_state.evening_checklist_active and st.session_state.data.get("daily_plan"):
         st.markdown("### 📋 Что ты сделала из плана?")
         plan_text = st.session_state.data["daily_plan"]
@@ -531,7 +561,7 @@ if page == "Главная":
                         "date": str(datetime.datetime.now()),
                         "text": f"✅ {task}"
                     })
-                save_data(st.session_state.data)
+                save_data_to_supabase(st.session_state.data)
                 st.success(f"✅ Добавлено {len(st.session_state.checklist_completed)} побед!")
                 st.session_state.evening_checklist_active = False
                 st.session_state.checklist_completed = []
@@ -539,7 +569,6 @@ if page == "Главная":
             else:
                 st.warning("Отметь хотя бы одну выполненную задачу.")
     
-    # Генерация плана из мыслей
     if not st.session_state.daily_plan_generated:
         st.markdown("<div class='thought-input'>", unsafe_allow_html=True)
         st.markdown("#### 📌 Что сегодня важно?")
@@ -563,7 +592,6 @@ if page == "Главная":
                 st.warning("Напиши свои задачи, чтобы я могла составить план.")
         st.markdown("</div>", unsafe_allow_html=True)
     
-    # Диалог с правками плана
     if st.session_state.daily_plan_generated and st.session_state.daily_plan_dialog:
         st.markdown("### 📋 Предлагаемый план")
         
@@ -597,35 +625,9 @@ if page == "Главная":
                     for msg in reversed(st.session_state.daily_plan_dialog):
                         if msg["role"] == "assistant" and ("план" in msg["content"].lower() or "составила" in msg["content"].lower()):
                             st.session_state.data["daily_plan"] = msg["content"]
-                            save_data(st.session_state.data)
+                            save_data_to_supabase(st.session_state.data)
                             st.success("✅ План на сегодня сохранён!")
                             break
-    
-    st.divider()
-    st.markdown("### 📦 Управление данными")
-    with st.container():
-        st.markdown("<div class='backup-card'>", unsafe_allow_html=True)
-        col1, col2 = st.columns(2)
-        with col1:
-            if st.button("💾 Скачать резервную копию", use_container_width=True):
-                json_str = json.dumps(st.session_state.data, ensure_ascii=False, indent=2, default=str)
-                b64 = base64.b64encode(json_str.encode()).decode()
-                filename = f"marina_backup_{dt.now().strftime('%Y-%m-%d')}.json"
-                href = f'<a href="data:application/json;base64,{b64}" download="{filename}" style="text-decoration:none;background:#7BAF8A;color:white;padding:0.5rem 1rem;border-radius:30px;display:inline-block;">📥 Скачать</a>'
-                st.markdown(href, unsafe_allow_html=True)
-        with col2:
-            uploaded_file = st.file_uploader("📂 Восстановить из бэкапа", type=["json"], label_visibility="collapsed")
-            if uploaded_file is not None:
-                try:
-                    backup_data = json.load(uploaded_file)
-                    if st.button("⚠️ Восстановить данные (заменит текущие)"):
-                        st.session_state.data = backup_data
-                        save_data(st.session_state.data)
-                        st.success("✅ Данные восстановлены!")
-                        st.rerun()
-                except:
-                    st.error("❌ Неверный формат файла")
-        st.markdown("</div>", unsafe_allow_html=True)
 
 elif page == "Победы":
     st.markdown("### 🌙 Мои победы")
@@ -671,7 +673,7 @@ elif page == "Победы":
                             "text": line.strip()
                         }
                         st.session_state.data["entries"].append(new_entry)
-                save_data(st.session_state.data)
+                save_data_to_supabase(st.session_state.data)
                 st.success(f"✅ Добавлено {len(lines)} побед!")
                 st.rerun()
             else:
@@ -702,14 +704,14 @@ elif page == "Победы":
                 with col3:
                     if st.button("🗑️", key=f"del_{entry['date']}_{idx}"):
                         st.session_state.data["entries"].remove(entry)
-                        save_data(st.session_state.data)
+                        save_data_to_supabase(st.session_state.data)
                         st.rerun()
                 with col4:
                     if st.session_state.editing_entry and st.session_state.editing_entry['date'] == entry['date']:
                         new_text = st.text_input("Новый текст:", entry['text'], key=f"edit_text_{idx}")
                         if st.button("Сохранить", key=f"save_edit_{idx}"):
                             entry['text'] = new_text
-                            save_data(st.session_state.data)
+                            save_data_to_supabase(st.session_state.data)
                             st.session_state.editing_entry = None
                             st.rerun()
     else:
@@ -791,7 +793,7 @@ elif page == "Планы":
                 if st.button("💾 Сохранить план недели"):
                     plan = "\n".join([m["content"] for m in st.session_state.chat_history if m["role"] == "assistant"])
                     st.session_state.data["weekly_plan"] = plan
-                    save_data(st.session_state.data)
+                    save_data_to_supabase(st.session_state.data)
                     st.success("✅ План недели сохранён!")
                     st.session_state.week_planning_active = False
                     st.rerun()
@@ -834,7 +836,7 @@ elif page == "Планы":
                 if st.button("💾 Сохранить план месяца"):
                     plan = "\n".join([m["content"] for m in st.session_state.chat_history if m["role"] == "assistant"])
                     st.session_state.data["monthly_plan"] = plan
-                    save_data(st.session_state.data)
+                    save_data_to_supabase(st.session_state.data)
                     st.success("✅ План месяца сохранён!")
                     st.session_state.month_planning_active = False
                     st.rerun()
@@ -858,6 +860,6 @@ elif page == "Цели":
 st.markdown("""
 <div class='footer'>
     🌿 Марина: Планер жизни — создано с любовью для тебя<br>
-    <small>Все данные сохраняются на сервере. Регулярно скачивайте резервную копию.</small>
+    <small>Все данные сохраняются в Supabase и не теряются.</small>
 </div>
 """, unsafe_allow_html=True)
