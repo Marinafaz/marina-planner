@@ -16,7 +16,6 @@ SUPABASE_URL = "https://udtmklwqetdndqlplswn.supabase.co"
 SUPABASE_KEY = "sb_publishable_47yrVYMRqKLNVslJ5_PhTA_pUIaeGXu"
 
 def supabase_request(method, endpoint, data=None):
-    """Универсальная функция для запросов к Supabase"""
     url = f"{SUPABASE_URL}/rest/v1/{endpoint}"
     headers = {
         "apikey": SUPABASE_KEY,
@@ -45,7 +44,6 @@ def supabase_request(method, endpoint, data=None):
         return None
 
 def load_data_from_supabase():
-    """Загружает данные из Supabase"""
     result = supabase_request("GET", "user_data?user_id=eq.marina")
     if result and len(result) > 0:
         return result[0]["data"]
@@ -58,7 +56,6 @@ def load_data_from_supabase():
             "weekly_focus": None,
             "monthly_focus": None
         }
-        # Создаём запись, если её нет
         supabase_request("POST", "user_data", {
             "user_id": "marina",
             "data": default_data
@@ -66,12 +63,8 @@ def load_data_from_supabase():
         return default_data
 
 def save_data_to_supabase(data):
-    """Сохраняет данные в Supabase — создаёт запись, если её нет"""
-    # Сначала проверяем, есть ли запись
     result = supabase_request("GET", "user_data?user_id=eq.marina")
-    
     if result and len(result) > 0:
-        # Запись есть — обновляем
         response = supabase_request("PATCH", f"user_data?user_id=eq.marina", {
             "data": data,
             "updated_at": datetime.datetime.now().isoformat()
@@ -83,7 +76,6 @@ def save_data_to_supabase(data):
             st.error("❌ Ошибка при обновлении данных")
             return False
     else:
-        # Записи нет — создаём
         response = supabase_request("POST", "user_data", {
             "user_id": "marina",
             "data": data
@@ -387,7 +379,6 @@ def get_ai_response_for_planning(chat_history, profile, api_key, planning_type, 
     return call_deepseek(prompt, api_key)
 
 def analyze_week_with_plots(entries, week_start, api_key):
-    """Анализ недели с графиками"""
     week_entries = []
     for e in entries:
         date_obj = datetime.datetime.strptime(e['date'], "%Y-%m-%d %H:%M:%S.%f")
@@ -791,14 +782,12 @@ elif page == "Планы":
                 else:
                     st.markdown(f"<div class='chat-message'>🌿 {msg['content']}</div>", unsafe_allow_html=True)
             
-            user_input = st.text_area("Ваше сообщение:", height=120, key="week_chat_input")
+            user_input = st.text_area("Ваше сообщение:", height=150, key="week_chat_input")
             col1, col2 = st.columns([1, 3])
             with col1:
                 if st.button("📩 Отправить", key="week_send"):
                     if user_input.strip():
                         st.session_state.chat_history.append({"role": "user", "content": user_input})
-                        # Очищаем поле
-                        st.session_state.week_chat_input = ""
                         with st.spinner("Думаю..."):
                             response = get_ai_response_for_planning(
                                 st.session_state.chat_history,
@@ -838,14 +827,12 @@ elif page == "Планы":
                 else:
                     st.markdown(f"<div class='chat-message'>🌿 {msg['content']}</div>", unsafe_allow_html=True)
             
-            user_input = st.text_area("Ваше сообщение:", height=120, key="month_chat_input")
+            user_input = st.text_area("Ваше сообщение:", height=150, key="month_chat_input")
             col1, col2 = st.columns([1, 3])
             with col1:
                 if st.button("📩 Отправить", key="month_send"):
                     if user_input.strip():
                         st.session_state.chat_history.append({"role": "user", "content": user_input})
-                        # Очищаем поле
-                        st.session_state.month_chat_input = ""
                         with st.spinner("Думаю..."):
                             response = get_ai_response_for_planning(
                                 st.session_state.chat_history,
@@ -859,7 +846,6 @@ elif page == "Планы":
                         st.warning("Напиши сообщение!")
             with col2:
                 if st.button("💾 Сохранить план месяца"):
-                    # Берём последнее сообщение от ассистента
                     plan = ""
                     for msg in reversed(st.session_state.chat_history):
                         if msg["role"] == "assistant":
