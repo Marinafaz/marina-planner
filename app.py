@@ -41,6 +41,7 @@ def supabase_request(method, endpoint, data=None):
         except:
             return True
     else:
+        st.error(f"❌ Ошибка Supabase: {response.status_code} - {response.text[:200]}")
         return None
 
 def load_data_from_supabase():
@@ -49,7 +50,6 @@ def load_data_from_supabase():
     if result and len(result) > 0:
         return result[0]["data"]
     else:
-        # Если данных нет — создаём запись с пустыми данными
         default_data = {
             "entries": [],
             "weekly_plan": None,
@@ -58,6 +58,7 @@ def load_data_from_supabase():
             "weekly_focus": None,
             "monthly_focus": None
         }
+        # Создаём запись, если её нет
         supabase_request("POST", "user_data", {
             "user_id": "marina",
             "data": default_data
@@ -65,11 +66,34 @@ def load_data_from_supabase():
         return default_data
 
 def save_data_to_supabase(data):
-    """Сохраняет данные в Supabase"""
-    supabase_request("PATCH", f"user_data?user_id=eq.marina", {
-        "data": data,
-        "updated_at": datetime.datetime.now().isoformat()
-    })
+    """Сохраняет данные в Supabase — создаёт запись, если её нет"""
+    # Сначала проверяем, есть ли запись
+    result = supabase_request("GET", "user_data?user_id=eq.marina")
+    
+    if result and len(result) > 0:
+        # Запись есть — обновляем
+        response = supabase_request("PATCH", f"user_data?user_id=eq.marina", {
+            "data": data,
+            "updated_at": datetime.datetime.now().isoformat()
+        })
+        if response is not None:
+            st.success("✅ Данные сохранены в Supabase")
+            return True
+        else:
+            st.error("❌ Ошибка при обновлении данных")
+            return False
+    else:
+        # Записи нет — создаём
+        response = supabase_request("POST", "user_data", {
+            "user_id": "marina",
+            "data": data
+        })
+        if response is not None:
+            st.success("✅ Данные созданы в Supabase")
+            return True
+        else:
+            st.error("❌ Ошибка при создании записи")
+            return False
 
 # ------------------ НАСТРОЙКИ СТРАНИЦЫ ------------------
 st.set_page_config(
@@ -373,17 +397,14 @@ def analyze_week_with_plots(entries, week_start, api_key):
     if not week_entries:
         return None, None, "Нет записей за эту неделю."
     
-    # Подготовка данных для графиков
     df = pd.DataFrame([{
         'date': datetime.datetime.strptime(e['date'], "%Y-%m-%d %H:%M:%S.%f").date(),
         'text': e['text']
     } for e in week_entries])
     
-    # График по дням
     daily_counts = df.groupby('date').size().reset_index(name='count')
     fig1 = px.bar(daily_counts, x='date', y='count', title='Количество побед по дням')
     
-    # Категории
     categories = {'спорт': 0, 'семья': 0, 'работа': 0, 'забота о себе': 0}
     for e in week_entries:
         text_lower = e['text'].lower()
@@ -394,7 +415,6 @@ def analyze_week_with_plots(entries, week_start, api_key):
     df_cat = pd.DataFrame([{'Категория': k, 'Количество': v} for k, v in categories.items() if v > 0])
     fig2 = px.pie(df_cat, values='Количество', names='Категория', title='Распределение побед по категориям')
     
-    # Анализ от ИИ
     text = "\n".join([f"- {e['text']}" for e in week_entries])
     prompt = f"""
     Сгруппируй победы по целям (спорт, семья, работа, забота о себе).
@@ -405,7 +425,7 @@ def analyze_week_with_plots(entries, week_start, api_key):
     
     return fig1, fig2, analysis
 
-# ------------------ АВТОРИЗАЦИЯ (с запоминанием ключа) ------------------
+# ------------------ АВТОРИЗАЦИЯ ------------------
 st.markdown("""
 <script>
     function loadCredentials() {
@@ -488,7 +508,6 @@ if st.session_state.authenticated and not st.session_state.api_key_verified:
 st.markdown(f"<h1 class='main-header'>🌿 Здравствуй, {PROFILE['name']}!</h1>", unsafe_allow_html=True)
 st.markdown("<p class='sub-header'>Ты — главный герой своей жизни ✨</p>", unsafe_allow_html=True)
 
-# Фокусы
 focus_week = st.session_state.data.get("weekly_focus") or "❓ Спланируйте неделю, чтобы задать фокус"
 focus_month = st.session_state.data.get("monthly_focus") or "❓ Спланируйте месяц, чтобы задать фокус"
 
@@ -632,7 +651,7 @@ if page == "Главная":
 elif page == "Победы":
     st.markdown("### 🌙 Мои победы")
     
-    victory_text = st.text_area("Напиши победу (каждую с новой строки):", height=120, key="victory_input")
+    victory_text = st.text_area("Напиши победу (каждую с новой строки):", height=150, key="victory_input")
     
     col_voice2, col_save = st.columns([1, 4])
     with col_voice2:
@@ -772,12 +791,14 @@ elif page == "Планы":
                 else:
                     st.markdown(f"<div class='chat-message'>🌿 {msg['content']}</div>", unsafe_allow_html=True)
             
-            user_input = st.text_input("Ваше сообщение:", key="week_chat_input")
+            user_input = st.text_area("Ваше сообщение:", height=120, key="week_chat_input")
             col1, col2 = st.columns([1, 3])
             with col1:
                 if st.button("📩 Отправить", key="week_send"):
                     if user_input.strip():
                         st.session_state.chat_history.append({"role": "user", "content": user_input})
+                        # Очищаем поле
+                        st.session_state.week_chat_input = ""
                         with st.spinner("Думаю..."):
                             response = get_ai_response_for_planning(
                                 st.session_state.chat_history,
@@ -793,10 +814,12 @@ elif page == "Планы":
                 if st.button("💾 Сохранить план недели"):
                     plan = "\n".join([m["content"] for m in st.session_state.chat_history if m["role"] == "assistant"])
                     st.session_state.data["weekly_plan"] = plan
-                    save_data_to_supabase(st.session_state.data)
-                    st.success("✅ План недели сохранён!")
-                    st.session_state.week_planning_active = False
-                    st.rerun()
+                    if save_data_to_supabase(st.session_state.data):
+                        st.success("✅ План недели сохранён!")
+                        st.session_state.week_planning_active = False
+                        st.rerun()
+                    else:
+                        st.error("❌ Ошибка сохранения плана недели")
     
     with tab2:
         st.markdown("#### План на месяц")
@@ -815,12 +838,14 @@ elif page == "Планы":
                 else:
                     st.markdown(f"<div class='chat-message'>🌿 {msg['content']}</div>", unsafe_allow_html=True)
             
-            user_input = st.text_input("Ваше сообщение:", key="month_chat_input")
+            user_input = st.text_area("Ваше сообщение:", height=120, key="month_chat_input")
             col1, col2 = st.columns([1, 3])
             with col1:
                 if st.button("📩 Отправить", key="month_send"):
                     if user_input.strip():
                         st.session_state.chat_history.append({"role": "user", "content": user_input})
+                        # Очищаем поле
+                        st.session_state.month_chat_input = ""
                         with st.spinner("Думаю..."):
                             response = get_ai_response_for_planning(
                                 st.session_state.chat_history,
@@ -834,12 +859,22 @@ elif page == "Планы":
                         st.warning("Напиши сообщение!")
             with col2:
                 if st.button("💾 Сохранить план месяца"):
-                    plan = "\n".join([m["content"] for m in st.session_state.chat_history if m["role"] == "assistant"])
-                    st.session_state.data["monthly_plan"] = plan
-                    save_data_to_supabase(st.session_state.data)
-                    st.success("✅ План месяца сохранён!")
-                    st.session_state.month_planning_active = False
-                    st.rerun()
+                    # Берём последнее сообщение от ассистента
+                    plan = ""
+                    for msg in reversed(st.session_state.chat_history):
+                        if msg["role"] == "assistant":
+                            plan = msg["content"]
+                            break
+                    if plan:
+                        st.session_state.data["monthly_plan"] = plan
+                        if save_data_to_supabase(st.session_state.data):
+                            st.success("✅ План месяца сохранён!")
+                            st.session_state.month_planning_active = False
+                            st.rerun()
+                        else:
+                            st.error("❌ Ошибка сохранения плана месяца")
+                    else:
+                        st.warning("Нет плана для сохранения")
 
 elif page == "Цели":
     st.markdown("### 🎯 Мои цели")
