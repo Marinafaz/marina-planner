@@ -71,7 +71,6 @@ def save_data_to_supabase(data):
             "updated_at": datetime.datetime.now().isoformat()
         })
         if response is not None:
-            st.success("✅ Данные сохранены в Supabase")
             return True
         else:
             st.error("❌ Ошибка при обновлении данных")
@@ -82,7 +81,6 @@ def save_data_to_supabase(data):
             "data": data
         })
         if response is not None:
-            st.success("✅ Данные созданы в Supabase")
             return True
         else:
             st.error("❌ Ошибка при создании записи")
@@ -258,6 +256,10 @@ if "evening_checklist_active" not in st.session_state:
     st.session_state.evening_checklist_active = False
 if "awaiting_focus_input" not in st.session_state:
     st.session_state.awaiting_focus_input = False
+if "focus_suggestion" not in st.session_state:
+    st.session_state.focus_suggestion = ""
+if "focus_confirmed" not in st.session_state:
+    st.session_state.focus_confirmed = False
 
 # ------------------ ФУНКЦИИ ДЛЯ РАБОТЫ С ИИ ------------------
 def call_deepseek(prompt, api_key, retries=2):
@@ -293,6 +295,22 @@ def call_deepseek(prompt, api_key, retries=2):
                 continue
             return f"Ошибка: {str(e)}"
     return "Ошибка: Не удалось получить ответ после нескольких попыток."
+
+def generate_focus_from_plan(plan, profile, api_key):
+    """Генерирует фокус месяца из плана"""
+    prompt = f"""
+    Ты — личный коуч Марины.
+    Вот её цели на 5 лет: {', '.join(profile['goals_5_years'])}
+    
+    Вот план Марины на месяц:
+    {plan}
+    
+    Задача:
+    Сформулируй ОДНИМ ПРЕДЛОЖЕНИЕМ (максимум 2) главный фокус этого месяца.
+    Фокус должен отражать самую важную цель или намерение из плана.
+    Отвечай на русском, коротко, вдохновляюще.
+    """
+    return call_deepseek(prompt, api_key)
 
 def generate_daily_plan_from_thoughts(thoughts, profile, api_key):
     weekly_plan = st.session_state.data.get("weekly_plan")
@@ -524,6 +542,7 @@ with col4:
         st.session_state.current_page = "Планы"
         st.session_state.week_planning_active = False
         st.session_state.month_planning_active = False
+        st.session_state.focus_confirmed = False
 with col5:
     if st.button("🎯 Цели", use_container_width=True):
         st.session_state.current_page = "Цели"
@@ -824,6 +843,37 @@ elif page == "Планы":
                     st.markdown(f"<div class='win-entry'>{line.strip()}</div>", unsafe_allow_html=True)
             st.divider()
         
+        # Если есть предложение фокуса и оно не подтверждено
+        if st.session_state.focus_suggestion and not st.session_state.focus_confirmed:
+            st.markdown("### 🎯 Фокус месяца")
+            st.info(f"💡 {st.session_state.focus_suggestion}")
+            col1, col2 = st.columns(2)
+            with col1:
+                if st.button("✅ Да, подходит"):
+                    st.session_state.data["monthly_focus"] = st.session_state.focus_suggestion
+                    if save_data_to_supabase(st.session_state.data):
+                        st.success("✅ Фокус месяца сохранён!")
+                        st.session_state.focus_confirmed = True
+                        st.rerun()
+            with col2:
+                if st.button("✏️ Скорректировать"):
+                    st.session_state.awaiting_focus_input = True
+                    st.session_state.focus_confirmed = False
+                    st.rerun()
+        
+        if st.session_state.awaiting_focus_input:
+            new_focus = st.text_input("Напиши свой вариант фокуса месяца:")
+            if st.button("Сохранить мой вариант"):
+                if new_focus.strip():
+                    st.session_state.data["monthly_focus"] = new_focus.strip()
+                    if save_data_to_supabase(st.session_state.data):
+                        st.success("✅ Фокус месяца сохранён!")
+                        st.session_state.awaiting_focus_input = False
+                        st.session_state.focus_suggestion = ""
+                        st.rerun()
+                else:
+                    st.warning("Напиши фокус.")
+        
         if not st.session_state.month_planning_active:
             if st.button("🗓️ Начать планирование месяца"):
                 st.session_state.month_planning_active = True
@@ -866,14 +916,18 @@ elif page == "Планы":
                         st.session_state.data["monthly_plan"] = plan
                         if save_data_to_supabase(st.session_state.data):
                             st.success("✅ План месяца сохранён!")
-                            st.session_state.month_planning_active = False
-                            st.rerun()
+                            # Генерируем фокус
+                            with st.spinner("Формулирую фокус месяца..."):
+                                focus = generate_focus_from_plan(plan, PROFILE, st.session_state.api_key)
+                                st.session_state.focus_suggestion = focus
+                                st.session_state.focus_confirmed = False
+                                st.session_state.month_planning_active = False
+                                st.rerun()
                         else:
                             st.error("❌ Ошибка сохранения плана месяца")
                     else:
                         st.warning("Нет плана для сохранения")
             
-            # Кнопка для обновления данных из Supabase
             if st.button("🔄 Обновить данные из Supabase"):
                 st.session_state.data = load_data_from_supabase()
                 st.rerun()
