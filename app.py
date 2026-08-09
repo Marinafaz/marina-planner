@@ -40,8 +40,7 @@ def supabase_request(method, endpoint, data=None):
         except:
             return True
     else:
-        # Показываем ошибку прямо в интерфейсе
-        st.error(f"❌ Ошибка Supabase: {response.status_code} - {response.text[:300]}")
+        st.error(f"❌ Ошибка Supabase: {response.status_code} - {response.text[:200]}")
         return None
 
 def load_data_from_supabase():
@@ -64,9 +63,6 @@ def load_data_from_supabase():
         return default_data
 
 def save_data_to_supabase(data):
-    # Показываем, что сохраняем
-    st.info("⏳ Сохраняю данные в Supabase...")
-    
     result = supabase_request("GET", "user_data?user_id=eq.marina")
     
     if result and len(result) > 0:
@@ -75,7 +71,7 @@ def save_data_to_supabase(data):
             "updated_at": datetime.datetime.now().isoformat()
         })
         if response is not None:
-            st.success("✅ Данные сохранены в Supabase!")
+            st.success("✅ Данные сохранены в Supabase")
             return True
         else:
             st.error("❌ Ошибка при обновлении данных")
@@ -86,7 +82,7 @@ def save_data_to_supabase(data):
             "data": data
         })
         if response is not None:
-            st.success("✅ Данные созданы в Supabase!")
+            st.success("✅ Данные созданы в Supabase")
             return True
         else:
             st.error("❌ Ошибка при создании записи")
@@ -818,6 +814,16 @@ elif page == "Планы":
     with tab2:
         st.markdown("#### План на месяц")
         
+        # Показываем сохранённый план месяца, если он есть
+        if st.session_state.data.get("monthly_plan"):
+            st.markdown("### 📋 Сохранённый план месяца")
+            plan_text = st.session_state.data["monthly_plan"]
+            lines = plan_text.split("\n")
+            for line in lines:
+                if line.strip():
+                    st.markdown(f"<div class='win-entry'>{line.strip()}</div>", unsafe_allow_html=True)
+            st.divider()
+        
         if not st.session_state.month_planning_active:
             if st.button("🗓️ Начать планирование месяца"):
                 st.session_state.month_planning_active = True
@@ -851,7 +857,6 @@ elif page == "Планы":
                         st.warning("Напиши сообщение!")
             with col2:
                 if st.button("💾 Сохранить план месяца"):
-                    # Берём последнее сообщение от ассистента
                     plan = ""
                     for msg in reversed(st.session_state.chat_history):
                         if msg["role"] == "assistant":
@@ -861,14 +866,17 @@ elif page == "Планы":
                         st.session_state.data["monthly_plan"] = plan
                         if save_data_to_supabase(st.session_state.data):
                             st.success("✅ План месяца сохранён!")
-                            # Принудительно показываем, что сохранилось
-                            st.info(f"📌 Сохранённый план: {plan[:200]}...")
                             st.session_state.month_planning_active = False
                             st.rerun()
                         else:
                             st.error("❌ Ошибка сохранения плана месяца")
                     else:
                         st.warning("Нет плана для сохранения")
+            
+            # Кнопка для обновления данных из Supabase
+            if st.button("🔄 Обновить данные из Supabase"):
+                st.session_state.data = load_data_from_supabase()
+                st.rerun()
 
 elif page == "Цели":
     st.markdown("### 🎯 Мои цели")
