@@ -40,7 +40,8 @@ def supabase_request(method, endpoint, data=None):
         except:
             return True
     else:
-        st.error(f"❌ Ошибка Supabase: {response.status_code} - {response.text[:200]}")
+        # Показываем ошибку прямо в интерфейсе
+        st.error(f"❌ Ошибка Supabase: {response.status_code} - {response.text[:300]}")
         return None
 
 def load_data_from_supabase():
@@ -63,14 +64,18 @@ def load_data_from_supabase():
         return default_data
 
 def save_data_to_supabase(data):
+    # Показываем, что сохраняем
+    st.info("⏳ Сохраняю данные в Supabase...")
+    
     result = supabase_request("GET", "user_data?user_id=eq.marina")
+    
     if result and len(result) > 0:
         response = supabase_request("PATCH", f"user_data?user_id=eq.marina", {
             "data": data,
             "updated_at": datetime.datetime.now().isoformat()
         })
         if response is not None:
-            st.success("✅ Данные сохранены в Supabase")
+            st.success("✅ Данные сохранены в Supabase!")
             return True
         else:
             st.error("❌ Ошибка при обновлении данных")
@@ -81,7 +86,7 @@ def save_data_to_supabase(data):
             "data": data
         })
         if response is not None:
-            st.success("✅ Данные созданы в Supabase")
+            st.success("✅ Данные созданы в Supabase!")
             return True
         else:
             st.error("❌ Ошибка при создании записи")
@@ -846,6 +851,7 @@ elif page == "Планы":
                         st.warning("Напиши сообщение!")
             with col2:
                 if st.button("💾 Сохранить план месяца"):
+                    # Берём последнее сообщение от ассистента
                     plan = ""
                     for msg in reversed(st.session_state.chat_history):
                         if msg["role"] == "assistant":
@@ -855,6 +861,8 @@ elif page == "Планы":
                         st.session_state.data["monthly_plan"] = plan
                         if save_data_to_supabase(st.session_state.data):
                             st.success("✅ План месяца сохранён!")
+                            # Принудительно показываем, что сохранилось
+                            st.info(f"📌 Сохранённый план: {plan[:200]}...")
                             st.session_state.month_planning_active = False
                             st.rerun()
                         else:
