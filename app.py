@@ -86,6 +86,16 @@ def save_data_to_supabase(data):
             st.error("❌ Ошибка при создании записи")
             return False
 
+def extract_last_focus_from_dialog(dialog):
+    """Извлекает последний фокус из диалога по маркеру 🎯 ФОКУС:"""
+    for msg in reversed(dialog):
+        if msg["role"] == "assistant":
+            lines = msg["content"].split('\n')
+            for line in lines:
+                if '🎯 ФОКУС:' in line:
+                    return line.replace('🎯 ФОКУС:', '').strip()
+    return None
+
 # ------------------ НАСТРОЙКИ СТРАНИЦЫ ------------------
 st.set_page_config(
     page_title="Марина: Планер жизни",
@@ -309,6 +319,10 @@ def generate_focus_from_plan(plan, profile, api_key):
     Задача:
     Сформулируй ОДНИМ ПРЕДЛОЖЕНИЕМ (максимум 2) главный фокус этого месяца.
     Фокус должен отражать самую важную цель или намерение из плана.
+    
+    В КОНЦЕ своего ответа обязательно напиши строку:
+    🎯 ФОКУС: (твой вариант фокуса)
+    
     Отвечай на русском, коротко, вдохновляюще.
     """
     return call_deepseek(prompt, api_key)
@@ -328,6 +342,8 @@ def refine_focus_in_dialog(focus, user_message, profile, api_key):
     1. Учти её замечания.
     2. Предложи обновлённый фокус (1-2 предложения).
     3. Спроси, так ли она видит свой фокус.
+    4. В КОНЦЕ своего ответа обязательно напиши строку:
+       🎯 ФОКУС: (обновлённый вариант фокуса)
     
     Отвечай на русском, тёпло, поддерживающе.
     """
@@ -895,26 +911,32 @@ elif page == "Планы":
                         st.warning("Напиши сообщение!")
             with col2:
                 if st.button("✅ Сохранить этот фокус"):
-                    # Извлекаем последний фокус из диалога
-                    for msg in reversed(st.session_state.focus_dialog):
-                        if msg["role"] == "assistant":
-                            focus = msg["content"]
-                            break
-                    st.session_state.data["monthly_focus"] = focus
-                    if save_data_to_supabase(st.session_state.data):
-                        st.success("✅ Фокус месяца сохранён!")
-                        st.session_state.focus_dialog_active = False
-                        st.session_state.focus_suggestion = ""
-                        st.rerun()
+                    # Ищем ПОСЛЕДНИЙ маркер 🎯 ФОКУС: во всём диалоге
+                    last_focus = extract_last_focus_from_dialog(st.session_state.focus_dialog)
+                    if last_focus:
+                        st.session_state.data["monthly_focus"] = last_focus
+                        if save_data_to_supabase(st.session_state.data):
+                            st.success("✅ Фокус месяца сохранён!")
+                            st.session_state.focus_dialog_active = False
+                            st.session_state.focus_suggestion = ""
+                            st.rerun()
+                    else:
+                        st.error("❌ Не найден маркер фокуса. Попробуй ещё раз.")
         
         # Если есть предложение фокуса, но диалог ещё не начат
         elif st.session_state.focus_suggestion and not st.session_state.focus_confirmed and not st.session_state.focus_dialog_active:
             st.markdown("### 🎯 Предлагаемый фокус месяца")
-            st.info(f"💡 {st.session_state.focus_suggestion}")
+            # Извлекаем фокус из предложения
+            focus_text = st.session_state.focus_suggestion
+            for line in focus_text.split('\n'):
+                if '🎯 ФОКУС:' in line:
+                    focus_text = line.replace('🎯 ФОКУС:', '').strip()
+                    break
+            st.info(f"💡 {focus_text}")
             col1, col2 = st.columns(2)
             with col1:
                 if st.button("✅ Подходит"):
-                    st.session_state.data["monthly_focus"] = st.session_state.focus_suggestion
+                    st.session_state.data["monthly_focus"] = focus_text
                     if save_data_to_supabase(st.session_state.data):
                         st.success("✅ Фокус месяца сохранён!")
                         st.session_state.focus_confirmed = True
@@ -924,7 +946,7 @@ elif page == "Планы":
                 if st.button("🔄 Обсудить"):
                     st.session_state.focus_dialog_active = True
                     st.session_state.focus_dialog = [
-                        {"role": "assistant", "content": f"Ты предложила такой фокус: \"{st.session_state.focus_suggestion}\". Что именно тебе не нравится? Давай вместе его улучшим."}
+                        {"role": "assistant", "content": f"Ты предложила такой фокус: \"{focus_text}\". Что именно тебе не нравится? Давай вместе его улучшим."}
                     ]
                     st.rerun()
         
